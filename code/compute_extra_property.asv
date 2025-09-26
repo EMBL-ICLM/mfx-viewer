@@ -1,0 +1,115 @@
+function data = compute_extra_property (data, Prefs)
+    %disp("compute extra property takes: ");
+    %tic;
+    %data.attr = attributes: add
+    %    itr (to 1-based), dt, dst, spd, nLoc_trace, tim_trace, ftr, idx
+    %
+    %data.prop = property: add
+    %   num_dim, origin, xyz, trace_idx, num_loc_per_trace, attr_names
+    %   RIMF to calibration?
+    %   xyz to xnm, ynm, znm
+    %
+    %data.calib = calibration: add
+    %   RIMF, loc_precision, local_density, pixel_size
+    %
+    %data.channel = channel: add
+    %   dcr (last or all iter), cut1, cut2, do_ch3, do_trace, ?RGB
+    %
+
+
+    % get xyz, origin, num_dim, 
+    if any(data.attr.loc_z, 'all')
+        data.prop.num_dim = 3;
+    else
+        data.prop.num_dim = 2;
+    end
+    
+    % xyz nm with 
+    
+    % get trace ID, and num_loc per trace
+    [~, ia, ic] = unique(data.attr.tid);
+    data.prop.trace_idx = [ia, [ ia(2:end)-1; length(data.attr.tid) ] ];
+    data.prop.num_loc_per_trace = accumarray(ic, 1);    
+    % num_loc_per_trace = arrayfun(@(id) sum(tid==id), uid);  % !!! too slow
+    % num_loc_per_trace = histcounts(data.attr.tid, [uid; inf])'; %  same speed, but need the unique trace IDs, instead of ic
+
+    % change iteration index to 1-based 
+    data.attr.itr = int8(1 + data.attr.itr);
+
+    % locate trace change index in raw data
+    tim = data.attr.tim;
+    tid = data.attr.tid;
+    idx = find(diff(tid));
+
+    % compute time interval from time stamp
+    dt = diff(tim);
+    dt(idx) = 0;  % remove in-between trace time interval
+    dt = [0; dt];
+    data.attr.dt = dt;
+    
+    % add travel distance, and instaneous speed attribute
+    loc = [data.attr.loc_x, data.attr.loc_y, data.attr.loc_z];
+    data.attr.dst = [0; vecnorm(diff(loc), 2, 2)];
+    data.attr.dst(idx+1) = 0;
+    data.attr.spd = data.attr.dst ./ dt;
+    
+    % compute number of localization, and relative time stamp of each trace
+    data.attr.nLoc = repelem(data.prop.num_loc_per_trace, data.prop.num_loc_per_trace);
+    t_start = tim([1; idx+1]);
+    t_min = repelem(t_start, data.prop.num_loc_per_trace);
+    data.attr.tim_trace = tim - t_min;
+    
+    % add filter attributes, representing as filter logical array
+    data.attr.ftr = true( data.prop.num_loc, 1 ); % filter index?
+
+    % add index of data
+    data.attr.idx = uint32( 1 : data.prop.num_loc )';
+    
+    % sum up attributes name, and store to data property
+    data.prop.attr_names = fieldnames(data.attr);
+
+
+    %% check prefs and populate calibration and channel related properties
+
+    % prepare physical calibration related properties
+    calibration = struct;
+    if Prefs.data.compute_rimf
+        calibration.RIMF = compute_RIMF(data, Prefs.plot.rimf_value);   % 2D data, RIMF set to 1 (consider 0 maybe?)
+    else
+        calibration.RIMF = app.Prefs.plot.rimf_value;
+    end
+    if Prefs.data.compute_locPrec
+        calibration.loc_precision = compute_Loc_precision (data);
+    end
+    if Prefs.data.compute_local_density
+        calibration.local_density = compute_local_density ( ...
+            data.attr.loc_x, data.attr.loc_y, ...
+            data.attr.loc_z * calibration.RIMF, ...
+            Prefs.data.local_density_radius);
+        data = add_attribute_to_data (data, 'den', calibration.local_density, 41);
+    end
+    data.calibration = calibration;
+
+
+    % prepare channel related properties
+    channel = struct;
+    if Prefs.data.load_all_dcr
+        dcr = data.file.raw_data.dcr;   % all dcr including value from invalid localizations
+    else
+        dcr = data.attr.dcr;
+    end
+    trace_idx = data.prop.trace_idx;
+    dcr_trace = arrayfun(@(id) mean( dcr(trace_idx(id,1) : trace_idx(id,2), :), 2, "omitnan"),  1:length(trace_idx), 'uni', 0);
+    dcr_trace = cell2mat(dcr_trace');
+    channel.dcr = dcr;
+    channel.dcr_trace = dcr_trace;
+    channel.numC = 1;
+    channel.cut1 = 1; 
+    channel.cut2 = 1;
+    channel.do_trace = false;
+    channel.keep_ch3 = false;
+    % channel.RGB = [1, 2, 3];
+    data.channel = channel;
+
+    %toc;
+end

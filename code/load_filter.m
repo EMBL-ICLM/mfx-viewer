@@ -1,0 +1,57 @@
+function load_filter (app, jsonfile, jsonpath)
+    
+    % will populate app.filters property in this function, and this
+    % function only!!!
+
+    if isequal(jsonfile, 0) || isequal(jsonpath, 0)
+        return;
+    end
+    
+    data = [];
+    idx = get_active_data_index(app);
+    if isempty(idx)
+        data = app.data{idx};
+    end
+
+    try
+        jsonText = fileread(fullfile(jsonpath, jsonfile));
+        jsonData = jsondecode(jsonText);
+
+        %filters = struct;
+        
+        filters = cell(length(jsonData), 6);
+
+        for i = 1 : length ( jsonData )
+            row = jsonData(i);
+            apply = row.apply;     % not neccessary
+            attr = row.attribute;
+            % if ~isfield(app.data, attr)
+            %     continue;
+            % end
+            %attrValue = getfield(app.data, attr); % we get the raw attribute value from data
+            plotVar = row.value_as;
+            minVal = row.min;
+            maxVal = row.max;
+            
+            ftr = compute_filter_array (data, {apply, attr, plotVar, minVal, maxVal});
+
+            filters(i, :) = {false, attr, plotVar, minVal, maxVal, ftr}; % when loading filter from json file, make apply filter to false for all
+
+        end
+
+        %filters.jsonfile = fullfile(jsonpath, jsonfile);
+        %filters.filter = filters;
+
+        % if ~isempty(app.data) & isfield(app.data, 'attr')
+        %     filters.ftr = app.data.attr.ftr;
+        % end
+
+        app.filters = filters;
+
+    catch Exception
+        app.StatusTextArea.Value = "Failed loading filter from json file!";
+    end
+
+    app.StatusTextArea.Value = ["Filter loaded:"; jsonfile];
+
+end
